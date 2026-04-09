@@ -51,12 +51,12 @@ ssh -p 168 alanwen@openclaw
 |------|---------|---------|
 | Codex | Code generation and execution | `codex exec --ephemeral` |
 | Claude | Planning, reasoning, and review | `claude -p --no-session-persistence` |
-| Gemini | Alternative analysis and second opinions | `GEMINI_HOME=/dev/shm/gemini gemini -p` |
+| Gemini | Alternative analysis and second opinions | `GEMINI_CLI_HOME=/dev/shm/gemini gemini -p` |
 
 **No-persistence flags (mandatory on every call):**
 - `codex exec --ephemeral` — native flag, prevents session files from being written to disk.
 - `claude -p --no-session-persistence` — native flag, no session data saved.
-- `gemini -p` — no native no-persist flag; redirect its state directory to RAM disk: `GEMINI_HOME=/dev/shm/gemini gemini -p`.
+- `gemini -p` — no native no-persist flag; redirect its state directory to RAM disk: `GEMINI_CLI_HOME=/dev/shm/gemini gemini -p`.
 
 ### 4. Multi-AI Collaboration Is Required
 - Coding tasks: Codex for implementation + Claude for review.
