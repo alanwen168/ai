@@ -47,29 +47,49 @@ ssh -p 168 alanwen@openclaw
 
 ### 3. Available AI Tools on openclaw (All $0 Cost)
 
-| Tool | Purpose | Command |
+| Tool | Purpose | Headless command (no-disk + auto-approve) |
 |------|---------|---------|
-| Codex | Code generation and execution | `codex exec --ephemeral` |
-| Claude | Planning, reasoning, and review | `claude -p --no-session-persistence` |
-| Gemini | Alternative analysis and second opinions | `GEMINI_CLI_HOME=/dev/shm/gemini gemini -p` |
+| Codex | Code generation and execution | `codex exec --ephemeral --full-auto --skip-git-repo-check "$PROMPT"` |
+| Claude | Planning, reasoning, and review | `claude -p --no-session-persistence --permission-mode bypassPermissions "$PROMPT"` |
+| Gemini | Alternative analysis and second opinions | `GEMINI_CLI_HOME=/dev/shm/gemini.$$ GEMINI_CLI_TRUST_WORKSPACE=true gemini -p "$PROMPT" --approval-mode yolo --skip-trust` |
 
-**No-persistence flags (mandatory on every call):**
-- `codex exec --ephemeral` — native flag, prevents session files from being written to disk.
-- `claude -p --no-session-persistence` — native flag, no session data saved.
-- `gemini -p` — no native no-persist flag; redirect its state directory to RAM disk: `GEMINI_CLI_HOME=/dev/shm/gemini gemini -p`.
+**No-persistence + auto-approve flags (mandatory on every call, verified 2026-04-25):**
+- **Codex** `codex exec --ephemeral` — native no-disk flag. Pair with `--full-auto` (sandboxed auto-approve) or `--dangerously-bypass-approvals-and-sandbox` (full bypass). NOTE: the old `--yolo` flag has been **REMOVED** — do not use it.
+- **Claude** `claude -p --no-session-persistence` — native no-disk flag (only valid with `-p`/`--print`). Add `--permission-mode bypassPermissions` so headless calls don't block on tool prompts.
+- **Gemini** has no native no-persist flag — redirect state to RAM with `GEMINI_CLI_HOME=/dev/shm/gemini.$$`. **Critical gotcha:** since v0.39 Gemini refuses headless runs in untrusted directories even with `--approval-mode yolo`. Bypass the gate with EITHER `GEMINI_CLI_TRUST_WORKSPACE=true` env var OR `--skip-trust` flag (use both for max compat). Without this you'll see "*not running in a trusted directory*" and approval mode silently downgrades to `default` → tool calls block forever.
 
 ### 4. Multi-AI Collaboration Is Required
 - Coding tasks: Codex for implementation + Claude for review.
 - Complex tasks: Claude + Gemini for dual analysis.
 - Important design tasks: all three AI tools generate independently, then combine the results.
 
-### 5. Stateless / No-Persistence Mode Is Mandatory
-All AI calls must:
-- Not save sessions.
-- Not write local files unless absolutely necessary for the task itself.
-- Not create persistent session data.
+**Reference: parallel 3-AI audit, fully no-disk (RAM only via anonymous pipes):**
+```bash
+PROMPT='audit recent changes; format CRITICAL/IMPORTANT/NICE-TO-HAVE with file:line citations'
 
-Goal: avoid unnecessary storage usage and prevent leftover session data.
+# Launch all three in parallel via process substitution — outputs live only in pipe buffers
+exec 10< <(claude -p --no-session-persistence --permission-mode bypassPermissions --output-format text "$PROMPT" 2>&1)
+exec 11< <(codex exec --ephemeral --full-auto --skip-git-repo-check "$PROMPT" 2>&1)
+exec 12< <(GEMINI_CLI_HOME=/dev/shm/gemini.$$ GEMINI_CLI_TRUST_WORKSPACE=true gemini -p "$PROMPT" --approval-mode yolo --skip-trust --output-format text 2>&1)
+
+# Drain into shell variables (still RAM); close FDs; clean RAM-disk crumb
+CLAUDE_OUT=$(cat <&10); exec 10<&-
+CODEX_OUT=$(cat <&11);  exec 11<&-
+GEMINI_OUT=$(cat <&12); exec 12<&-
+rm -rf /dev/shm/gemini.$$ 2>/dev/null
+
+# Now consolidate $CLAUDE_OUT / $CODEX_OUT / $GEMINI_OUT in-memory and act on findings
+```
+Nothing is written to `/tmp/audit_*.txt` or any persistent location. If you must stage files, use `/dev/shm/<unique>` (tmpfs/RAM) and clean up with `trap`.
+
+### 5. Stateless / No-Persistence Mode Is Mandatory (不落盘)
+All AI calls must:
+- Not save sessions (use the native `--ephemeral` / `--no-session-persistence` flags above; for Gemini, redirect `GEMINI_CLI_HOME` to `/dev/shm/...`).
+- Not write audit prompts or audit results to `/tmp/*.txt` or any disk path. Pass prompts as shell variables; capture outputs via process substitution `<( ... )` into shell variables.
+- If staging is unavoidable, use `/dev/shm/<unique>` (tmpfs/RAM) with a `trap "rm -rf ..." EXIT` cleanup.
+- Never leave behind session files, log files, or scratch files on disk.
+
+Goal: zero persistent footprint — every audit/run leaves the disk exactly as it found it.
 
 ### 6. Invocation Requirements
 - Execute AI commands remotely through SSH.
